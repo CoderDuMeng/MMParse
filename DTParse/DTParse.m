@@ -11,12 +11,8 @@
 #import "DTDiskCache.h"
 #import "DTFileCache.h"
 
-/*
- 解析url类 查看是否是 6个面的url
- */
-
 static NSString *TypeToURL(NSString * url) {
-    NSArray *types = @[@".png",@".jpg",@".mp4",@".mp3",@".JPG",@".PNG",@".MP4",@".MP3"];
+    NSArray *types = @[@".png",@".jpg",@".mp4",@".mp3",@".JPG",@".PNG",@".MP4",@".MP3",@".mov",@".MOV"];
     NSString *type = url.lastPathComponent;
     NSString *stringT = nil;
     for (NSString *t in types) {
@@ -40,10 +36,23 @@ static NSString *TypeToURL(NSString * url) {
 }
 @end
 
-/***
- 解析类
- */
+
 @interface DTParse()
+{
+    
+    /**
+     代理方法 判断的变量  是否执行
+     */
+    BOOL _delegateRespondDidStartParse;
+    BOOL _delegateRespondDidNewXmlString;
+    BOOL _delegateRespondDidFinishFilePathString;
+    BOOL _delegateRespondDidFinishReplaceXmlFile;
+    BOOL _delegateRespondDidFinishURLs;
+    BOOL _delegateRespondDidFinishCount;
+    BOOL _delegateResondDidError;
+    
+    
+}
 
 //<< 本地包含两个xml文件 一个是原始下载没有替换的 这个是替换的地址
 @property (copy , nonatomic) NSString *replaceXmlPath;
@@ -65,30 +74,44 @@ static NSString *TypeToURL(NSString * url) {
 @property (assign , nonatomic) int finishCount;
 //是否完成 设置的最大count
 @property (assign , nonatomic) int isMaxCount;
+//缓存file size
+@property (strong , nonatomic) DTFileCache *fileCache;
+//队列对象
+@property (strong , nonatomic) NSOperationQueue *operationQueue;
+
 @end
 @implementation DTParse
-- (BOOL)_targetSelector:(SEL)sel{
-    return [_delegate respondsToSelector:sel];
+-(void)setDelegate:(id<DTParseDelegate>)delegate {
+    if (_delegate != delegate) {
+        _delegate = nil;
+        _delegate = delegate;
+        _delegateRespondDidStartParse = [_delegate respondsToSelector:@selector(parse:didStartParse:)];
+        _delegateRespondDidNewXmlString = [_delegate respondsToSelector:@selector(parse:didNewXmlString:path:)];
+        _delegateRespondDidFinishFilePathString = [_delegate respondsToSelector:@selector(parse:didFinishFilePathString:)];
+        _delegateRespondDidFinishReplaceXmlFile = [_delegate respondsToSelector:@selector(parse:didFinishReplaceXmlFile:path:)];
+        _delegateRespondDidFinishURLs = [_delegate respondsToSelector:@selector(parse:didFinishURLs:)];
+        _delegateRespondDidFinishCount = [_delegate respondsToSelector:@selector(parse:didFinishCount:)];
+        _delegateResondDidError = [_delegate respondsToSelector:@selector(parse:didError:)];
+    }
 }
 
 -(instancetype)init{
     if (self=[super init]) {
-        self.maxCount = 6;
+        _maxCount = 6;
         _main = dispatch_get_main_queue();
         _queue  = dispatch_queue_create("com.detu.DTParse", DISPATCH_QUEUE_SERIAL);
+        _operationQueue = [NSOperationQueue new];
         
+        NSString *filePath = [NSString stringWithFormat:@"detu.com/%@",@"failure.plist".MD5].cacheComponent;
+        _fileCache = [[DTFileCache alloc] initWithPath:filePath];
     }
     return self;
 }
-
-
 static NSArray *urlsToXML(NSString *xml) {
     NSString * urlpattern = @"([hH]ttp[s]{0,1})://[a-zA-Z0-9\\.\\-]+\\.([a-zA-Z]{2,4})(:\\d+)?(/[a-zA-Z0-9\\-~!@#$%^&*+?:_/=<>.',;]*)?";
     NSRegularExpression *regular   = [[NSRegularExpression alloc] initWithPattern:urlpattern options:0 error:nil];
     NSArray *results               = [regular matchesInString:xml options:0 range:NSMakeRange(0, xml.length)];
     return results;
-    
-    
 }
 static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
     @autoreleasepool {
@@ -133,31 +156,33 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
             if ([NSJSONSerialization isValidJSONObject:data]) {
                 value = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableLeaves error:nil];
             } else {
-                NSString *xml =  [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                value = xml;
+                value =  [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             }
-            if (value) {
+            if (value && [value isKindOfClass:[NSString class]]) {
                 if (block)block(value);
             }
         } else {
-            [self _failure:_url];
+            [self _failureXMLURL:_url value:NO];
         }
         
     } progress:nil] start];
     
 }
 
-
-- (void)_failure:(NSString *)key {
-    BOOL is = [[DTDiskCache diskCache] setValue:@(NO) key:key];
-    if (is) {
-        _isExecute = NO;
-        if ([self _targetSelector:@selector(parse:didError:)]) {
-            [_delegate parse:self didError:[NSError errorWithDomain:@"下载失败 整体" code:0 userInfo:nil]];
+- (void)_failureXMLURL:(NSString *)key value:(BOOL)value{
+    
+    [_fileCache setValue:[NSNumber numberWithBool:value] key:key];
+    
+    if (!value) {
+        _isExecute = value;
+        if (_delegateResondDidError) {
+            NSString *info = [NSString stringWithFormat:@"下载失败 XMLURL %@",key];
+            [_delegate parse:self didError:[NSError errorWithDomain:info code:0 userInfo:nil]];
         }
     }
-    
 }
+
+
 - (void)_start{
     for (int i = 0 ;  i  < self.totalURLs.count ; i ++ ) {
         [self _start:self.totalURLs[i]];
@@ -192,14 +217,14 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
                 if (finish) {
                     [_totalURLs removeObject:info];
                     _finishCount ++;
-                    if ([self _targetSelector:@selector(parse:didFinishCount:)]) {
+                    if (_delegateRespondDidFinishCount) {
                         [_delegate parse:self didFinishCount:_finishCount];
                     }
                     NSRange range =  [_replaceXml rangeOfString:info.oldUrl];
                     if (range.location != NSNotFound) {
                         _replaceXml = [_replaceXml stringByReplacingOccurrencesOfString:info.oldUrl withString:replacePath];
                     }
-                    if ([self _targetSelector:@selector(parse:didFinishFilePathString:)]) {
+                    if (_delegateRespondDidFinishFilePathString) {
                         [_delegate parse:self didFinishFilePathString:filePath];
                     }
                     if (_finishCount == _count && _totalURLs.count == 0) {
@@ -207,16 +232,17 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
                         _finishCount = 0;
                         _isMaxCount = 0;
                         if ([_replaceXml writeToFile:_replaceXmlPath]) {
-                            if ([self _targetSelector:@selector(parse:didFinishReplaceXmlFile:path:)]) {
+                            if (_delegateRespondDidFinishReplaceXmlFile) {
                                 [_delegate parse:self didFinishReplaceXmlFile:_replaceXml path:_replaceXmlPath];
                             }
                         }
                         if ([_xml writeToFile:_xmlPath]) {
-                            if ([self _targetSelector:@selector(parse:didNewXmlString:path:)]) {
+                            if (_delegateRespondDidNewXmlString) {
                                 [_delegate parse:self didNewXmlString:_xml path:_xmlPath];
                             }
+                            
                         }
-                        [[DTDiskCache diskCache] setValue:@(YES) key:_url];
+                        [self _failureXMLURL:_url value:YES];
                     } else {
                         _isMaxCount++;
                         if (_isMaxCount == _maxCount ) {
@@ -226,7 +252,7 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
                     }
                 } else {
                     if (_totalURLs.count) {
-                        [self _failure:_url];
+                        [self _failureXMLURL:_url value:NO];
                         [[DTDiskCache diskCache] removeFilePath:filePath];
                     }
                     _isMaxCount = 0;
@@ -239,6 +265,7 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
          假设中途 App 崩溃 本地文件不是完整的 但是存在的  这里效验本地文件存在的真实性
          
          */
+        
         static  DTFileCache *fileCache = nil;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
@@ -247,82 +274,99 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
                 fileCache = [[DTFileCache alloc] initWithPath:fileName.cacheComponent];
             }
         });
+        
+        //响应
         DTOpertaionResponseBlock response = ^(NSInteger size,NSString *url) {
             dispatch_async(_main, ^{
                 [fileCache setValue:[NSNumber numberWithInteger:size] key:url];
             });
         };
-        BOOL isExists  = [[DTDiskCache diskCache] isExistFilePath:filePath];
-        NSInteger compSize = [[fileCache valueToKey:url.absoluteString] integerValue];
-        NSInteger filesize = [filePath fileSize];
-        BOOL isSame  = compSize == filesize;
-        if (isExists && isSame) {
-            completeBlock(nil,nil,YES,url.absoluteString);
-        } else {
-            if (filesize)[[DTDiskCache diskCache] removeFilePath:filePath]; //移除不完成的
-            NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-            DTOpertaion *opertaioin = [[DTOpertaion alloc] initWithURL:request path:filePath  response:response complete:completeBlock progress:nil];
-            NSOperationQueue *queue = [NSOperationQueue new];
-            if (queue) {
-                [queue addOperation:opertaioin];
-            } else {
-                [opertaioin start];
-                
-            }
-        }
         
+        NSString *stringURL = url.absoluteString;
+        //内存中没有的话
+        BOOL isMem = [[[DTMemoryCache memoryCache] valueToKey:filePath] boolValue];
+        if (!isMem) {
+            BOOL isExists  = [[DTDiskCache diskCache] isExistFilePath:filePath];
+            NSInteger compSize = [[fileCache valueToKey:stringURL] integerValue];
+            NSInteger filesize = [filePath fileSize];
+            BOOL isSame  = compSize == filesize;
+            /*
+             
+             验证本地是否存在  和 存在的是否完整  缺一不可
+             
+             本地有存每个文件的总size   每次都和本地已经存在的对比  相同是真实  否则假
+             
+             */
+            if (isExists && isSame) {
+                [[DTMemoryCache memoryCache] setValue:@(YES) key:filePath];
+                completeBlock(nil,nil,YES,stringURL);
+            } else {
+                if (filesize)[[DTDiskCache diskCache] removeFilePath:filePath]; //移除不完成的
+                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+                DTOpertaion *opertaioin = [[DTOpertaion alloc] initWithURL:request path:filePath  response:response complete:completeBlock progress:nil];
+                if (_operationQueue) {
+                    [_operationQueue addOperation:opertaioin];
+                } else {
+                    [opertaioin start];
+                }
+            }
+        } else {
+            // 内存中有的了 并且本地是存在的 文件也是完整的
+            completeBlock(nil,nil,YES,stringURL);
+            
+        }
     }
     
     //NSLog(@"%f", ( (self.finishCount * 1.0 ) + ((1.0 * receivedSize) / expectedSize ))/ (_count * 1.0));
 }
-- (void)_request{
+- (void)_update{
     @autoreleasepool {
-        if ([_delegate respondsToSelector:@selector(parse:didStartParse:)]) {
-            [_delegate parse:self didStartParse:_url];
-        }
+        if (_delegateRespondDidStartParse)[_delegate parse:self didStartParse:_url];
+        
         _isExecute = YES;
         NSString *url = self.url;
         NSString *oldXml =  [NSString stringWithContentsOfFile:_xmlPath encoding:NSUTF8StringEncoding error:nil];
         NSString *replaceXml = [NSString stringWithContentsOfFile:_replaceXmlPath encoding:NSUTF8StringEncoding error:nil];
         __weak typeof(self)_self = self;
         void (^requestBlock)(NSString *newXml) = ^(NSString *newXml){
+            
             __strong typeof(_self)self = _self;
             _xml = [newXml copy];
             _replaceXml = [_xml copy];
             
             if (oldXml && [oldXml isEqualToString:newXml]) {
+                
                 dispatch_async(_main, ^{
                     _isSame =  YES;
                     _isExecute = NO;
-                    
-                    if ([self _targetSelector:@selector(parse:didFinishReplaceXmlFile:path:)]) {
+                    if (_delegateRespondDidFinishReplaceXmlFile) {
                         [_delegate parse:self didFinishReplaceXmlFile:replaceXml path:_replaceXmlPath];
                     }
                 });
+                
             } else {
                 
                 NSMutableArray *urls = [parseFilter(newXml) mutableCopy];
-                if ([self _targetSelector:@selector(parse:didFinishURLs:)]) {
+                if (_delegateRespondDidFinishURLs) {
                     [_delegate parse:self didFinishURLs:urls];
                 }
                 _urls = [urls mutableCopy];
                 _totalURLs = [_urls mutableCopy];
                 _count = (int)urls.count;
-                if (_urls) {
-                    [self _start];
-                }
+                if (_urls)[self _start];  // start download
             }
         };
         
-        
-        if (replaceXml && _update) {  //是否要更新
+        /*
+         本地存在了的时候 设置是否要检查更新   isUpdate is YES 更新  default is NO  不更新
+         */
+        if (replaceXml && !self.isUpdate) {  //是否要更新
             _isSame = NO;
             _isExecute = NO;
-            if ([self _targetSelector:@selector(parse:didFinishReplaceXmlFile:path:)]) {
+            if (_delegateRespondDidFinishReplaceXmlFile) {
                 [_delegate parse:self didFinishReplaceXmlFile:replaceXml path:_replaceXmlPath];
             }
         } else {
-            
             [self _xmlToURL:url block:requestBlock];
         }
     }
@@ -330,6 +374,9 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
 }
 - (void)_update:(NSString *)url{
     @autoreleasepool {
+        /*
+         处理xml 对应的本地路径 包括根部文件夹 xml 文件path
+         */
         _url = [url copy];
         _count = 0;
         NSString *superDir = [[[DTDiskCache diskCache] makeDirPath:url] copy];
@@ -337,20 +384,17 @@ static NSMutableArray <DTURLInfo *>* parseFilter(NSString *xml){
         _replaceXmlPath = [superDir appendingPath:[url appending:@"replace"].MD5.appendingXMl];
         _replaceFilePath = [[DTDiskCache diskCache] smallReplaceFilePath:url];
         _superDirPath = superDir;
-        
     }
 }
 
 -(void)start:(NSString *)url{
-    if (self.isExecute) return;
+    if (_isExecute) return;
     NSString *xmlUrl = [url copy];
-    _isFinish = [[DTDiskCache diskCache] valueKey:url];
+    _isFinish = [[_fileCache valueToKey:url] boolValue];
     [self _update:xmlUrl];  //处理文件路径
-    [self _request];
+    [self _update];
     
 }
-
-
 
 
 @end

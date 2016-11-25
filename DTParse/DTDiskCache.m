@@ -26,7 +26,6 @@
 - (NSString *)smallReplaceFilePath:(NSString *)key{
     NSString *replacePath = [NSString stringWithFormat:@"%@%@",[self replacePath],[self superDirName]];
     return  [replacePath stringByAppendingString:key.MD5];
-    
 }
 - (NSString *)makeSuperDirPath:(NSString *)key{
     return [[self superDirName] stringByAppendingString:[key MD5]].cacheComponent;
@@ -41,43 +40,6 @@
     }
     return dirPath;
 }
-
-- (NSMutableDictionary *)makeDiskFileFromPath:(NSString *)path{
-    return [NSMutableDictionary dictionaryWithContentsOfFile:path];
-}
-
-#pragma mark  xml url state
-- (NSString *)failureFilePath {
-    return [NSString stringWithFormat:@"detu.com/%@",@"failure.plist".MD5].cacheComponent;
-}
-- (NSMutableDictionary *)filureUrlValue{
-    return [self makeDiskFileFromPath:[self failureFilePath]];
-}
--(BOOL)setValue:(id )value key:(NSString *)key{
-    NSMutableDictionary *dict = [self filureUrlValue];
-    if (dict == nil) {
-        dict  = [NSMutableDictionary dictionary];
-    }
-    dict[key] = value;
-    return [dict writeToFile:[self failureFilePath] atomically:YES];
-}
--(BOOL)removeValueKey:(NSString *)key {
-    NSMutableDictionary *dict = [self filureUrlValue];
-    if ([dict.allKeys containsObject:key]) {
-        [dict removeObjectForKey:key];
-        return [dict writeToFile:[self failureFilePath] atomically:YES];
-    }
-    return NO;
-}
--(BOOL)valueKey:(NSString *)key{
-    return [[self filureUrlValue][key]boolValue];
-}
-
-#pragma end 
-
-
-
-
 -(BOOL)removeFilePath:(NSString *)path{
     return [_fileManager removeItemAtPath:path error:nil];
 }
@@ -85,14 +47,12 @@
     return [_fileManager fileExistsAtPath:path];
 }
 @end
-
 @implementation NSString(MD5)
 -(NSString *)MD5{
     // 得出bytes
     const char *cstring = self.UTF8String;
     unsigned char bytes[CC_MD5_DIGEST_LENGTH];
     CC_MD5(cstring, (CC_LONG)strlen(cstring), bytes);
-    
     // 拼接
     NSMutableString *md5String = [NSMutableString string];
     for (int i = 0; i < CC_MD5_DIGEST_LENGTH; i++) {
@@ -126,7 +86,6 @@
 }
 -(NSString *)appending:(NSString *)str{
     return [self stringByAppendingString:str];
-    
 }
 
 @end

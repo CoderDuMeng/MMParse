@@ -46,17 +46,15 @@
 
 @interface DTParse : NSObject
 @property (assign , nonatomic , readonly) BOOL isFinish; //<<是否是完成下载过的xml地址
-@property (copy , nonatomic   ,readonly)  NSString  *url; //解析xml的地址
+@property (copy   , nonatomic ,readonly)  NSString  *url; //解析xml的地址
 @property (strong , nonatomic ,readonly) NSMutableArray *urls; //全部Urls
 @property (assign , nonatomic , readonly) int  count; //<<全部执行url 个数
 @property (assign , nonatomic , readonly) BOOL isExecute;//<< 是否正在执行
 @property (assign , nonatomic , readonly) BOOL isSame;//<< 是不是和本地相同的xml  是 return 1
 @property (copy   , nonatomic , readonly)  NSString *replaceXml; //<< 最新的xml 替换完成本地地址的
-@property (weak , nonatomic) id <DTParseDelegate>delegate; //<< 代理对象
-@property (copy , nonatomic,readonly) NSString *superDirPath; //<<每个xml地址创建的文件夹的跟文件夹的path
-
-
-@property (assign , nonatomic)  BOOL update; //<< 本地是下载完整的是否去更新
+@property (weak   , nonatomic) id <DTParseDelegate>delegate; //<< 代理对象
+@property (copy   , nonatomic ,readonly) NSString *superDirPath; //<<每个xml地址创建的文件夹的跟文件夹的path
+@property (assign , nonatomic)  BOOL isUpdate; //<< 本地已经存在的时候去不去更新xml  Default is No
 
 
 /**开始请求xml 解析xml  下载xml 里面每一个url*/
